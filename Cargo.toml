@@ -24,3 +24,6 @@ keywords = ["audio", "binding"]
 # license identifiers from http://spdx.org/licenses/. Multiple licenses can
 # be separated with a `/`
 license = "MIT"
+
+[dependencies]
+libc="*"
