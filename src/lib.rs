@@ -2,23 +2,19 @@ extern crate libc;
 use libc::{c_void, c_uint, c_int};
 use std::ptr;
 use std::mem::{transmute};
-use std::num::Float;
-use std::rc;
 use std::ffi::CString;
-use std::io;
-use std::io::prelude::*;
 
-pub type cubeb_ptr = *mut c_void;
-pub type cubeb_stream_ptr = *mut c_void;
-pub type cubeb_data_callback = extern "C" fn(cubeb_stream_ptr,
+pub type CubebPtr = *mut c_void;
+pub type CubebStreamPtr = *mut c_void;
+pub type CubebDataCallback = extern "C" fn(CubebStreamPtr,
                                              *mut libc::c_void,
                                              *mut libc::c_void,
                                              libc::c_long) -> libc::c_long;
-pub type cubeb_state_callback = extern "C" fn(cubeb_stream_ptr,
+pub type CubebStateCallback = extern "C" fn(CubebStreamPtr,
                                               *mut libc::c_void,
-                                              enum_cubeb_state);
+                                              CubebState);
 
-pub type enum_cubeb_sample_format = c_uint;
+pub type CubebSampleFormat = c_uint;
 pub const CUBEB_SAMPLE_S16LE: u32 = 0_u32;
 pub const CUBEB_SAMPLE_S16BE: u32 = 1_u32;
 pub const CUBEB_SAMPLE_FLOAT32LE: u32 = 2_u32;
@@ -26,13 +22,13 @@ pub const CUBEB_SAMPLE_FLOAT32BE: u32 = 3_u32;
 pub const CUBEB_SAMPLE_S16NE: u32 = CUBEB_SAMPLE_S16LE;
 pub const CUBEB_SAMPLE_FLOAT32NE: u32 = CUBEB_SAMPLE_FLOAT32LE;
 
-pub type enum_cubeb_state = c_uint;
+pub type CubebState = c_uint;
 pub static CUBEB_STATE_STARTED: u32 = 0_u32; /**< Stream started. */
 pub static CUBEB_STATE_STOPPED: u32 = 1_u32; /**< Stream stopped. */
 pub static CUBEB_STATE_DRAINED: u32 = 2_u32; /**< Stream drained. */
 pub static CUBEB_STATE_ERROR: u32 = 3_u32;   /**< Stream disabled due to error. */
 
-pub type enum_cubeb_errors = c_int;
+pub type CubebErrors = c_int;
 /* Success. */
 pub static CUBEB_OK: i32 = 0_i32;
 /* Unclassified error. */
@@ -44,49 +40,56 @@ pub static CUBEB_ERROR_INVALID_PARAMETER: i32 = -3_i32;
 
 
 pub struct cubeb_stream_params {
-  format: enum_cubeb_sample_format,
+  format: CubebSampleFormat,
   rate: libc::uint32_t,
   channels: libc::uint32_t,
 }
 
 #[link(name = "cubeb")]
 extern {
-  fn cubeb_init(context: &mut cubeb_ptr, context_name: *const u8) -> libc::c_int;
-  fn cubeb_get_backend_id(context: cubeb_ptr) -> *mut libc::c_char;
-  fn cubeb_get_max_channel_count(context: cubeb_ptr,
+  fn cubeb_init(context: &mut CubebPtr, context_name: *const u8) -> libc::c_int;
+  fn cubeb_get_backend_id(context: CubebPtr) -> *mut libc::c_char;
+  fn cubeb_get_max_channel_count(context: CubebPtr,
                                  max_channels: *mut libc::uint32_t) -> libc::c_int;
-  fn cubeb_get_min_latency(context: cubeb_ptr,
+  fn cubeb_get_min_latency(context: CubebPtr,
                            params: cubeb_stream_params,
                            latency_ms: *mut libc::uint32_t) -> libc::c_int;
-  fn cubeb_get_preferred_sample_rate(context: cubeb_ptr,
+  fn cubeb_get_preferred_sample_rate(context: CubebPtr,
                                      rate: *mut libc::uint32_t) -> libc::c_int;
-  fn cubeb_destroy(context: cubeb_ptr);
-  fn cubeb_stream_init(context: cubeb_ptr,
-                       stream: *mut cubeb_stream_ptr,
+  fn cubeb_destroy(context: CubebPtr);
+  fn cubeb_stream_init(context: CubebPtr,
+                       stream: *mut CubebStreamPtr,
                        stream_name: *const u8,
                        stream_params: cubeb_stream_params,
                        latency: libc::c_uint,
-                       data_callback: cubeb_data_callback,
-                       state_callback: cubeb_state_callback,
+                       data_callback: CubebDataCallback,
+                       state_callback: CubebStateCallback,
                        user_ptr: *mut AudioStream) -> libc::c_int;
 
-  fn cubeb_stream_destroy(stream: cubeb_stream_ptr);
-  fn cubeb_stream_start(stream: cubeb_stream_ptr) -> libc::c_int;
-  fn cubeb_stream_stop(stream: cubeb_stream_ptr) -> libc::c_int;
-  fn cubeb_stream_get_position(stream: cubeb_stream_ptr,
+  fn cubeb_stream_destroy(stream: CubebStreamPtr);
+  fn cubeb_stream_start(stream: CubebStreamPtr) -> libc::c_int;
+  fn cubeb_stream_stop(stream: CubebStreamPtr) -> libc::c_int;
+  fn cubeb_stream_get_position(stream: CubebStreamPtr,
                                position: *mut libc::uint64_t) -> libc::c_int;
-  fn cubeb_stream_get_latency(stream: cubeb_stream_ptr,
+  fn cubeb_stream_get_latency(stream: CubebStreamPtr,
                               latency: *mut libc::uint32_t) -> libc::c_int;
 }
 
+pub type DataCallback = fn(buffer: &mut [f32]) -> i32;
+
+fn noopcallback(buffer: &mut [f32]) -> i32
+{
+  buffer.len() as i32
+}
 
 pub struct AudioStream {
   rate: u32,
-  format: enum_cubeb_sample_format,
+  format: CubebSampleFormat,
   channels: u32,
-  stream: cubeb_stream_ptr,
+  stream: CubebStreamPtr,
   phase: f32,
-  ctx: std::rc::Rc<CubebContext>
+  ctx: std::rc::Rc<CubebContext>,
+  callback: DataCallback
 }
 
 impl AudioStream {
@@ -98,16 +101,18 @@ impl AudioStream {
       channels: 0,
       stream: ptr::null_mut(),
       phase: 0.0,
-      ctx: ctx.clone()
+      ctx: ctx.clone(),
+      callback: noopcallback
     };
   }
   pub fn init(&mut self,
-          rate: u32,
-          channels: u32,
-          format: enum_cubeb_sample_format,
-          name: &str)
+              rate: u32,
+              channels: u32,
+              format: CubebSampleFormat,
+              callback: DataCallback,
+              name: &str)
   {
-    let mut rv = false;
+    let mut rv;
     let cubeb_format = cubeb_stream_params {
        format: format,
        rate: rate,
@@ -118,12 +123,12 @@ impl AudioStream {
       self.rate = rate;
       self.format = format;
       self.channels = channels;
-      self.phase = 0.;
+      self.callback = callback;
 
       let cstr = CString::new(name).unwrap();
 
       rv = cubeb_stream_init(self.ctx.get(),
-                             transmute::<&mut cubeb_stream_ptr,*mut cubeb_stream_ptr>(&mut self.stream),
+                             transmute::<&mut CubebStreamPtr,*mut CubebStreamPtr>(&mut self.stream),
                              cstr.as_bytes_with_nul().as_ptr(),
                              cubeb_format,
                              40,
@@ -134,16 +139,6 @@ impl AudioStream {
         println!("Error.");
       }
     }
-  }
-  fn refill(&mut self, buffer: &mut [f32]) {
-    let W = std::f32::consts::PI * 2.0 * 440. / (self.rate as f32);
-    for i in range(0, buffer.len()) {
-      for j in range(0, self.channels as usize) {
-        buffer[i + j] = self.phase.sin();
-      }
-      self.phase += W;
-    }
-    println!("Clock: {}", self.clock());
   }
   pub fn start(&self) {
     unsafe {
@@ -157,7 +152,7 @@ impl AudioStream {
   }
   pub fn clock(&self) -> u64 {
     let mut pos: libc::uint64_t = 0;
-    let mut rv = false;
+    let mut rv;
     unsafe {
       rv = cubeb_stream_get_position(self.stream, &mut pos) == CUBEB_OK;
     }
@@ -169,7 +164,7 @@ impl AudioStream {
   }
   pub fn latency(&self) -> u32 {
     let mut lat: libc::uint32_t = 0;
-    let mut rv = false;
+    let mut rv;
     unsafe {
       rv = cubeb_stream_get_latency(self.stream, &mut lat) == CUBEB_OK;
     }
@@ -190,7 +185,7 @@ impl Drop for AudioStream {
   }
 }
 
-extern fn refill_glue(stm: cubeb_stream_ptr,
+extern fn refill_glue(stm: CubebStreamPtr,
                       user: *mut c_void,
                       buffer: *mut c_void,
                       nframes: libc::c_long) -> libc::c_long
@@ -200,30 +195,28 @@ extern fn refill_glue(stm: cubeb_stream_ptr,
   unsafe {
     stream = transmute(user as *mut AudioStream);
     fbuf = transmute((buffer as *mut f32, nframes * (*stream).channels as i64));
-    (*stream).refill(fbuf);
+    ((*stream).callback)(fbuf);
   }
 
   nframes
 }
 
-extern fn state(stm: cubeb_stream_ptr,
+extern fn state(stm: CubebStreamPtr,
                 user: *mut c_void,
-                state: enum_cubeb_state)
+                state: CubebState)
 {
-  unsafe {
-    println!("state: {}", state);
-  }
+  println!("state: {}", state);
 }
 
 
 pub struct CubebContext {
-  ctx: cubeb_ptr
+  ctx: CubebPtr
 }
 
 impl CubebContext
 {
   pub fn new(name: &str) -> CubebContext {
-    let mut cubeb: cubeb_ptr = ptr::null_mut();
+    let mut cubeb: CubebPtr = ptr::null_mut();
     let mut rv = false;
     let cstr = CString::new(name).unwrap();
     unsafe {
@@ -236,7 +229,7 @@ impl CubebContext
       ctx: cubeb
     }
   }
-  fn get(&self) -> cubeb_ptr {
+  fn get(&self) -> CubebPtr {
     self.ctx
   }
   pub fn backend_id(&self) ->  &'static str {
@@ -284,20 +277,5 @@ impl Drop for CubebContext {
       cubeb_destroy(self.ctx);
     }
   }
-}
-
-fn main() {
-  let ctx: std::rc::Rc<CubebContext> = std::rc::Rc::new(CubebContext::new("rust-cubeb"));
-  let mut astream = AudioStream::new(ctx.clone());
-
-  astream.init(44100, 1, CUBEB_SAMPLE_FLOAT32NE, "rust-cubeb-stream0");
-  astream.start();
-
-      let stdin = io::stdin();
-    for line in stdin.lock().lines() {
-        println!("{}", line.unwrap());
-    }
-
-  astream.stop();
 }
 
