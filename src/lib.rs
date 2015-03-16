@@ -105,7 +105,7 @@ impl AudioStream {
       callback: Box::new(|_| 0)
     };
   }
-  pub fn init<T>(&mut self,
+  pub fn init(&mut self,
                  rate: u32,
                  channels: u32,
                  format: CubebSampleFormat,
