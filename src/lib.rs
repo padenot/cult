@@ -3,6 +3,7 @@ use libc::{c_void, c_uint, c_int};
 use std::ptr;
 use std::mem::{transmute};
 use std::ffi::CString;
+use std::ffi::CStr;
 
 pub type CubebPtr = *mut c_void;
 pub type CubebStreamPtr = *mut c_void;
@@ -33,13 +34,14 @@ pub type CubebErrors = c_int;
 pub static CUBEB_OK: i32 = 0_i32;
 /* Unclassified error. */
 pub static CUBEB_ERROR: i32 = -1_i32;
-/* Unsupported cubeb_stream_params requested. */
+/* Unsupported CubebStreamParams requested. */
 pub static CUBEB_ERROR_INVALID_FORMAT: i32 = -2_i32;
 /* Invalid parameter specified. */
 pub static CUBEB_ERROR_INVALID_PARAMETER: i32 = -3_i32;
 
 
-pub struct cubeb_stream_params {
+#[repr(C)]
+pub struct CubebStreamParams {
   format: CubebSampleFormat,
   rate: libc::uint32_t,
   channels: libc::uint32_t,
@@ -48,11 +50,11 @@ pub struct cubeb_stream_params {
 #[link(name = "cubeb")]
 extern {
   fn cubeb_init(context: &mut CubebPtr, context_name: *const u8) -> libc::c_int;
-  fn cubeb_get_backend_id(context: CubebPtr) -> *mut libc::c_char;
+  fn cubeb_get_backend_id(context: CubebPtr) -> *const libc::c_char;
   fn cubeb_get_max_channel_count(context: CubebPtr,
                                  max_channels: *mut libc::uint32_t) -> libc::c_int;
   fn cubeb_get_min_latency(context: CubebPtr,
-                           params: cubeb_stream_params,
+                           params: CubebStreamParams,
                            latency_ms: *mut libc::uint32_t) -> libc::c_int;
   fn cubeb_get_preferred_sample_rate(context: CubebPtr,
                                      rate: *mut libc::uint32_t) -> libc::c_int;
@@ -60,11 +62,11 @@ extern {
   fn cubeb_stream_init(context: CubebPtr,
                        stream: *mut CubebStreamPtr,
                        stream_name: *const u8,
-                       stream_params: cubeb_stream_params,
+                       stream_params: CubebStreamParams,
                        latency: libc::c_uint,
                        data_callback: CubebDataCallback,
                        state_callback: CubebStateCallback,
-                       user_ptr: *mut AudioStream) -> libc::c_int;
+                       user_ptr: *const AudioStream) -> libc::c_int;
 
   fn cubeb_stream_destroy(stream: CubebStreamPtr);
   fn cubeb_stream_start(stream: CubebStreamPtr) -> libc::c_int;
@@ -75,7 +77,7 @@ extern {
                               latency: *mut libc::uint32_t) -> libc::c_int;
 }
 
-pub type DataCallback = fn(buffer: &mut [f32]) -> i32;
+pub type DataCallback = Box<FnMut(&mut [f32]) -> i32>;
 
 fn noopcallback(buffer: &mut [f32]) -> i32
 {
@@ -87,7 +89,6 @@ pub struct AudioStream {
   format: CubebSampleFormat,
   channels: u32,
   stream: CubebStreamPtr,
-  phase: f32,
   ctx: std::rc::Rc<CubebContext>,
   callback: DataCallback
 }
@@ -100,20 +101,19 @@ impl AudioStream {
       format: CUBEB_SAMPLE_FLOAT32NE,
       channels: 0,
       stream: ptr::null_mut(),
-      phase: 0.0,
       ctx: ctx.clone(),
-      callback: noopcallback
+      callback: Box::new(|_| 0)
     };
   }
-  pub fn init(&mut self,
-              rate: u32,
-              channels: u32,
-              format: CubebSampleFormat,
-              callback: DataCallback,
-              name: &str)
+  pub fn init<T>(&mut self,
+                 rate: u32,
+                 channels: u32,
+                 format: CubebSampleFormat,
+                 callback: DataCallback,
+                 name: &str)
   {
     let mut rv;
-    let cubeb_format = cubeb_stream_params {
+    let cubeb_format = CubebStreamParams {
        format: format,
        rate: rate,
        channels: channels
@@ -217,7 +217,7 @@ impl CubebContext
 {
   pub fn new(name: &str) -> CubebContext {
     let mut cubeb: CubebPtr = ptr::null_mut();
-    let mut rv = false;
+    let mut rv;
     let cstr = CString::new(name).unwrap();
     unsafe {
       rv = cubeb_init(transmute(&mut cubeb), cstr.as_bytes_with_nul().as_ptr()) == 0;
@@ -233,12 +233,12 @@ impl CubebContext
     self.ctx
   }
   pub fn backend_id(&self) ->  &'static str {
-    // let backend_id : str;
-    // unsafe {
-    // backend_id = std::slice::from_raw_parts(cubeb_get_backend_id(self.get()), libc::strlen(self.get()))
-    // }
-    // backend_id
-    ""
+    let chars : *const i8;
+    unsafe {
+      chars = cubeb_get_backend_id(self.get());
+      let slice = CStr::from_ptr(chars).to_bytes();
+      return std::str::from_utf8(slice).unwrap();
+    }
   }
   pub fn max_channel_count(&self) -> u32 {
     let mut max_channel_count: u32 = 0;
@@ -249,7 +249,7 @@ impl CubebContext
     }
     max_channel_count
   }
-  pub fn min_latency(&self, params: cubeb_stream_params) -> u32 {
+  pub fn min_latency(&self, params: CubebStreamParams) -> u32 {
     let mut min_latency: u32 = 0;
     unsafe {
       if cubeb_get_min_latency(self.get(), params, &mut min_latency) !=
