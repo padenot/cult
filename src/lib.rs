@@ -1,4 +1,8 @@
 extern crate libc;
+#[macro_use]
+#[cfg(feature = "plugins")]
+extern crate heapsize;
+
 use libc::{c_void, c_uint, c_int};
 use std::ptr;
 use std::mem::{transmute};
@@ -279,3 +283,5 @@ impl Drop for CubebContext {
   }
 }
 
+#[cfg(feature = "plugins")]
+known_heap_size!(0, AudioStream);
