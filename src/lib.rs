@@ -47,7 +47,7 @@ pub struct CubebStreamParams {
   channels: libc::uint32_t,
 }
 
-#[link(name = "cubeb")]
+#[link(name = "cubeb", kind = "static")]
 extern {
   fn cubeb_init(context: &mut CubebPtr, context_name: *const u8) -> libc::c_int;
   fn cubeb_get_backend_id(context: CubebPtr) -> *const libc::c_char;
@@ -112,7 +112,7 @@ impl AudioStream {
                  callback: DataCallback,
                  name: &str)
   {
-    let mut rv;
+    let rv;
     let cubeb_format = CubebStreamParams {
        format: format,
        rate: rate,
@@ -152,7 +152,7 @@ impl AudioStream {
   }
   pub fn clock(&self) -> u64 {
     let mut pos: libc::uint64_t = 0;
-    let mut rv;
+    let rv;
     unsafe {
       rv = cubeb_stream_get_position(self.stream, &mut pos) == CUBEB_OK;
     }
@@ -164,7 +164,7 @@ impl AudioStream {
   }
   pub fn latency(&self) -> u32 {
     let mut lat: libc::uint32_t = 0;
-    let mut rv;
+    let rv;
     unsafe {
       rv = cubeb_stream_get_latency(self.stream, &mut lat) == CUBEB_OK;
     }
@@ -194,7 +194,7 @@ extern fn refill_glue(stm: CubebStreamPtr,
   let stream: *mut AudioStream;
   unsafe {
     stream = transmute(user as *mut AudioStream);
-    fbuf = transmute((buffer as *mut f32, nframes * (*stream).channels as i64));
+    fbuf = transmute((buffer as *mut f32, nframes * (*stream).channels as libc::c_long));
     ((*stream).callback)(fbuf);
   }
 
@@ -217,7 +217,7 @@ impl CubebContext
 {
   pub fn new(name: &str) -> CubebContext {
     let mut cubeb: CubebPtr = ptr::null_mut();
-    let mut rv;
+    let rv;
     let cstr = CString::new(name).unwrap();
     unsafe {
       rv = cubeb_init(transmute(&mut cubeb), cstr.as_bytes_with_nul().as_ptr()) == 0;
@@ -233,7 +233,7 @@ impl CubebContext
     self.ctx
   }
   pub fn backend_id(&self) ->  &'static str {
-    let chars : *const i8;
+    let chars : *const libc::c_char;
     unsafe {
       chars = cubeb_get_backend_id(self.get());
       let slice = CStr::from_ptr(chars).to_bytes();

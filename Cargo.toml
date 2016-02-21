@@ -25,5 +25,14 @@ keywords = ["audio", "bindings"]
 # be separated with a `/`
 license = "MIT"
 
+build = "build.rs"
+
+[features]
+build-cubeb = []
+
+[build-dependencies]
+pkg-config = "0.3.5"
+submodules = "0.1.0"
+
 [dependencies]
 libc="*"
