@@ -51,7 +51,7 @@ pub struct CubebStreamParams {
   channels: libc::uint32_t,
 }
 
-#[link(name = "cubeb", kind = "static")]
+#[link(name = "cubeb")]
 extern {
   fn cubeb_init(context: &mut CubebPtr, context_name: *const u8) -> libc::c_int;
   fn cubeb_get_backend_id(context: CubebPtr) -> *const libc::c_char;
