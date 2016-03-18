@@ -1,31 +1,31 @@
-#![feature(core)]
-#![feature(std_misc)]
-
 extern crate cult;
 use cult::*;
-use std::num::Float;
-use std::sync::{StaticMutex, MUTEX_INIT, StaticCondvar, CONDVAR_INIT};
-
-static CVAR: StaticCondvar = CONDVAR_INIT;
-static M: StaticMutex = MUTEX_INIT;
+use std::sync::{Arc, Mutex, Condvar};
 
 #[test]
 fn sine() {
-  let ctx: std::rc::Rc<CubebContext> = std::rc::Rc::new(CubebContext::new("rust-cubeb"));
+  let ctx: std::rc::Rc<CubebContext> =
+    std::rc::Rc::new(CubebContext::new("rust-cubeb"));
   let mut astream = AudioStream::new(ctx.clone());
-  let g = M.lock().unwrap();
+  let p1 = Arc::new((Mutex::new(false), Condvar::new()));
+  let p2 = p1.clone();
+
+
+  let &(ref m1, ref cv1) = &*p1;
+  let g = m1.lock().unwrap();
   let mut phase: Box<f32> = Box::new(0.0);
 
   let cb: DataCallback = Box::new(move |buffer: &mut [f32]| {
     let w = std::f32::consts::PI * 2.0 * 440. / (44100 as f32);
+    let &(ref m2, ref cv2) = &*p2;
     for i in 0 .. buffer.len() {
-      for j in range(0, 1) {
+      for j in 0 .. 1 {
         buffer[i + j] = (*phase).sin();
       }
       (*phase) += w;
     }
     assert!(buffer.len() != 0);
-    CVAR.notify_one();
+    cv2.notify_one();
     buffer.len() as i32
   });
 
@@ -33,8 +33,7 @@ fn sine() {
 
   astream.start();
 
-  let g = CVAR.wait(g).unwrap();
-  drop(g);
+  cv1.wait(g).unwrap();
 
   astream.stop();
 }
