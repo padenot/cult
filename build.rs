@@ -2,18 +2,9 @@ extern crate pkg_config;
 extern crate submodules;
 extern crate cmake;
 
-use std::process::Command;
 use std::io::{BufRead, BufReader};
 use std::fs::File;
 use std::env;
-
-fn check_command(cmd: &str) -> bool {
-  return Command::new("which").arg(cmd)
-                              .status()
-                              .unwrap_or_else(|e| {
-    panic!("Failed to execute command: {}", e)
-  }).success();
-}
 
 fn parse_cubeb_cache(cache: String) -> String {
   let file = File::open(cache.clone()).unwrap_or_else(|e| {
@@ -70,10 +61,6 @@ fn main()
     println!("cargo:rustc-link-lib=dylib=cubeb");
     return
   }
-
-  let out_dir = env::var("OUT_DIR").unwrap();
-  let cubeb_src_dir = "cubeb";
-  let cubeb_build_dir = "cubeb-build";
 
   submodules::update().init().recursive().run();
 
