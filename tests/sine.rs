@@ -1,40 +1,44 @@
 extern crate cult;
-use cult::*;
+
 use std::sync::{Arc, Mutex, Condvar};
 
 #[test]
 fn sine() {
-  let ctx: std::rc::Rc<CubebContext> =
-    std::rc::Rc::new(CubebContext::new("rust-cubeb"));
-  let mut astream = AudioStream::new(ctx.clone());
+  let ctx = cult::Context::new("rust-cubeb", None).unwrap();
   let p1 = Arc::new((Mutex::new(false), Condvar::new()));
   let p2 = p1.clone();
-
 
   let &(ref m1, ref cv1) = &*p1;
   let g = m1.lock().unwrap();
   let mut phase: Box<f32> = Box::new(0.0);
 
-  let cb: DataCallback = Box::new(move |buffer: &mut [f32]| {
-    let w = std::f32::consts::PI * 2.0 * 440. / (44100 as f32);
-    let &(ref m2, ref cv2) = &*p2;
-    for i in 0 .. buffer.len() {
+  let cb: cult::DataCallback<f32> = Box::new(move |_: &[f32], obuf: &mut [f32]| {
+    let w = std::f32::consts::PI * 2_f32 * 440_f32 / 44100_f32;
+    let &(ref _m2, ref cv2) = &*p2;
+    for i in 0 .. obuf.len() {
       for j in 0 .. 1 {
-        buffer[i + j] = (*phase).sin();
+        obuf[i + j] = (*phase).sin();
       }
       (*phase) += w;
     }
-    assert!(buffer.len() != 0);
+    assert!(obuf.len() != 0);
     cv2.notify_one();
-    buffer.len() as i32
+    obuf.len()
   });
 
-  astream.init(44100, 1, CUBEB_SAMPLE_FLOAT32NE, cb, "rust-cubeb-stream0");
+  let params = cult::StreamParams::<f32>::new(44100, 1, cult::ChannelLayout::Mono);
+  let min_latency = ctx.min_latency(params).expect("could not retrieve minimum latency");
 
-  astream.start();
+  let astream = cult::Stream::<f32>::new(
+      &ctx, "rust-cubeb-stream0",
+      None, None, None, Some(params),
+      min_latency, cb, Some(Box::new(cult::print_state_change))
+  ).expect("could not create audio stream");
+
+  astream.start().unwrap();
 
   cv1.wait(g).unwrap();
 
-  astream.stop();
+  astream.stop().unwrap();
 }
 
